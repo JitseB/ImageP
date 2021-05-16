@@ -46,7 +46,7 @@ Version 2.0 (16 May 2021):
 Version 1.0 (9 May 2021):
     - Simple single class image processor using a Matplotlib GUI and its events.
 """
-DOCUMENTATION = """Please view the documentation on the <a href="https://github.com/JitseB/ImageP/blob/main/DOCUMENATION.md">GitHub repository</a>."""
+DOCUMENTATION = """Please view the documentation on the <a href="https://github.com/JitseB/ImageP/blob/main/DOCUMENTATION.md">GitHub repository</a>."""
 
 class PlotWidget(QtWidgets.QWidget):
     """Qt widget to hold the matplotlib canvas and the tools for interacting with the plot"""
