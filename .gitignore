@@ -2,3 +2,7 @@ __pycache__
 *.swp
 .gitignore
 .ipynb_checkpoints
+.vscode
+*.jpg
+*.png
+*.mp4
