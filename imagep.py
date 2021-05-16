@@ -25,13 +25,16 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
 import numpy as np
-import sys, cv2
+import sys, cv2, warnings
+warnings.filterwarnings("error")
 
 VERSION_INFO = 'version 2.1'
 CHANGELOG = """Changelog:
 Version 2.1 (16 May 2021):
     - Bug fix: 'gui'-parameters now actually work.
     - Bug fix: Reuse QtApplication, otherwise the kernel dies in Jupyter notebooks.
+    - Bug fix: Catching warning caused by angle measurement.
+    - Removed unit origin as we cannot know it previous position, therefore we cannot compensate for it properly.
 Version 2.0 (16 May 2021):
     - Converted to PyQt5 application for more functionality.
     - Added movable origin and button.
@@ -291,11 +294,13 @@ class ImageWindow(QtWidgets.QMainWindow):
                 A = self.get_relative_calibrated(self.points[-2])
                 distanceAC = ((A[0]-C[0])**2+(A[1]-C[1])**2)**(1/2)
                 distanceAB = ((A[0]-B[0])**2+(A[1]-B[1])**2)**(1/2)
-                if distanceAC*distanceAB > 0: # To prevent devision by zero
+                try:
                     angle = np.arccos((distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB))*180/np.pi
                     self.angle_label.setText(f'Angle: {angle:.2f} deg')
+                except RuntimeWarning:
+                    pass # Do not do anything, it is most likely a devide by zero error
 
-def gui(path, origin=None, pixel_origin=True, calibration=(1, 1), unit='px', color='black'):
+def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
     """
     Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
     Parameters:
@@ -317,11 +322,10 @@ def gui(path, origin=None, pixel_origin=True, calibration=(1, 1), unit='px', col
         # Convert image data to RGB for Matplotlib
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        # The origin was returned calibrated from the (0, 0) origin, we have to compensate for that...
-        if origin is not None:
-            origin = (origin[0], image.shape[0]-origin[1])
-            if not pixel_origin: # Convert origin into pixel origin if necessary
-                origin = (origin[0]/calibration[0], origin[1]/calibration[1])
+        # The origin point was returned calibrated from the (0, 0) origin, we have to compensate for that...
+        # 16 May 2021:  Removed unit origin as we cannot know the previous origin, therefore we cannot
+        #               compensate for it properly.
+        if origin is not None: origin = (origin[0], image.shape[0]-origin[1]) 
         else: origin = (0, image.shape[0])
 
         # Launch the GUI application
