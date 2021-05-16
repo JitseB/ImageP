@@ -23,14 +23,15 @@
 from PyQt5 import QtWidgets, QtGui
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-
 import matplotlib.pyplot as plt
-
 import numpy as np
-import cv2
+import sys, cv2
 
-VERSION_INFO = 'version 2.0'
+VERSION_INFO = 'version 2.1'
 CHANGELOG = """Changelog:
+Version 2.1 (16 May 2021):
+    - Bug fix: 'gui'-parameters now actually work.
+    - Bug fix: Reuse QtApplication, otherwise the kernel dies in Jupyter notebooks.
 Version 2.0 (16 May 2021):
     - Converted to PyQt5 application for more functionality.
     - Added movable origin and button.
@@ -97,7 +98,7 @@ class PlotCanvas(FigureCanvas):
         
     def get_cursor(self):
         """Get the coordinates of the cursor"""
-        return self.mouse
+        return self.cursor
 
     def _on_click(self, event):
         """Internal function to handle the Matplotlib click event, used to click points and set the origin position"""
@@ -106,7 +107,7 @@ class PlotCanvas(FigureCanvas):
         # If the origin was moving, lock it in place
         if self.window.move_origin:
             self.window.move_origin = False
-            self.window.origin = self.mouse
+            self.window.origin = self.get_cursor()
             return
 
         # if there is a right-click, add the coords to the points array
@@ -126,7 +127,7 @@ class PlotCanvas(FigureCanvas):
             self.redraw()
 
         # Set the mouse coordinates and update the statusbar
-        self.mouse = (event.xdata, event.ydata)
+        self.cursor = (event.xdata, event.ydata)
         self.window._update_statusbar()
 
 class CalibrationDialog(QtWidgets.QDialog):
@@ -180,12 +181,12 @@ class CalibrationDialog(QtWidgets.QDialog):
             msg.exec_()
 
 class ImageWindow(QtWidgets.QMainWindow):
-    def __init__(self, image, origin, calibration, color):
+    def __init__(self, image, origin, calibration, unit, color):
         super(ImageWindow, self).__init__()
         self.image = image
         self.origin = origin
         self.calibration = calibration
-        self.unit = 'px' # Default unit
+        self.unit = unit # Default unit is pixels
         self.points = []
         self.color = color
         self.move_origin = False
@@ -236,7 +237,7 @@ class ImageWindow(QtWidgets.QMainWindow):
     def get_relative_calibrated(self, point):
         """Get point position relative to origin and apply calibration"""
         # First position the points relative to the origin, then multiply by their calibration factors
-        return ((point[0]-self.origin[0])*self.calibration[0], (point[1]-self.origin[1]*self.calibration[1]))
+        return ((point[0]-self.origin[0])*self.calibration[0], ((self.origin[1]-point[1])*self.calibration[1]))
 
     def get_calibrated_points(self):
         """Returns the array we were after, the calibrated points from the image relative to the origin"""
@@ -294,13 +295,20 @@ class ImageWindow(QtWidgets.QMainWindow):
                     angle = np.arccos((distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB))*180/np.pi
                     self.angle_label.setText(f'Angle: {angle:.2f} deg')
 
-def gui(path, origin=(0, 0), calibration=(1, 1), color='black'):
+def gui(path, origin=None, pixel_origin=True, calibration=(1, 1), unit='px', color='black'):
     """
-    Function that opens the GUI of ImageP. Returns array with clicked points.
-    Clicked points are multiplied by the calibration array, by default 1 pixel is 1 unit length.
-    'image_path' should be a path to the image, by default the image is changed to grayscale.
-    (Reason for the grayscale is that sometimes Matplotlib has issues displaying large coloured images).
-    """
+    Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
+    Parameters:
+        - 'image_path': Path to image.
+        - 'origin': Change the origin to position xy (optional).
+            If the passed origin is not in pixel units, you must pass 'pixel_origin'=False,
+            so that the origin position is calculated correctly from the entered unit size.
+            By default 'pixel_origin' is True.
+        - 'calibration': The pixel calibration array (x and y pixel size) (optional).
+        - 'color': The color used for the axis and points (optional).
+
+    'origin', 'calibration' and 'unit' can also be defined from within the GUI.
+   """
 
     try:
         # Load the image
@@ -309,9 +317,18 @@ def gui(path, origin=(0, 0), calibration=(1, 1), color='black'):
         # Convert image data to RGB for Matplotlib
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        # The origin was returned calibrated from the (0, 0) origin, we have to compensate for that...
+        if origin is not None:
+            origin = (origin[0], image.shape[0]-origin[1])
+            if not pixel_origin: # Convert origin into pixel origin if necessary
+                origin = (origin[0]/calibration[0], origin[1]/calibration[1])
+        else: origin = (0, image.shape[0])
+
         # Launch the GUI application
-        app = QtWidgets.QApplication([])
-        window = ImageWindow(image, origin, calibration, color)
+        # Use previous instance if available
+        if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
+        else: app = QtWidgets.QApplication.instance()
+        window = ImageWindow(image, origin, calibration, unit, color)
         window.show()
         app.exec_()
         
