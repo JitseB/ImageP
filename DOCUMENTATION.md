@@ -89,4 +89,7 @@ Here, as expected, we see an angle of 90 degrees between the point at the 5 cm m
 ## Returned data
 After calibrating the pixel size and setting the origin, you may use ImageP for whatever your experiment is about. The `gui` function returns the calibrated points relative to the origin automatically.
 
+## Clicked wrong
+If you clicked wrong, you can use `ctrl+z` to remove the previously clicked dot.
+
 Happy coding!

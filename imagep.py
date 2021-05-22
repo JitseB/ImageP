@@ -30,6 +30,9 @@ warnings.filterwarnings("error")
 
 VERSION_INFO = 'version 2.1'
 CHANGELOG = """Changelog:
+Version 2.2 (22 May 2021):
+    - Bug fix: No dot added when in zoom or pan mode.
+    - Added ctrl+z feature to remove previously clicked dot.
 Version 2.1 (16 May 2021):
     - Bug fix: 'gui'-parameters now actually work.
     - Bug fix: Reuse QtApplication, otherwise the kernel dies in Jupyter notebooks.
@@ -81,6 +84,7 @@ class PlotCanvas(FigureCanvas):
         self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color)
 
         self.mouse = (0, 0)
+        self._artists = []
 
         # Connect to all necessary events
         self.connect()
@@ -93,15 +97,32 @@ class PlotCanvas(FigureCanvas):
         """Connect to all necessary Matplotlib events"""
         self.cidpress = self.fig.canvas.mpl_connect('button_press_event', self._on_click)
         self.cidmotion = self.fig.canvas.mpl_connect('motion_notify_event', self._on_motion)
+        self.cidkey = self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+        self.cidenter = self.fig.canvas.mpl_connect('axes_enter_event', self._on_enter)
 
     def disconnect(self):
         """Disconnect from all used Matplotlib events"""
         self.fig.canvas.mpl_disconnect(self.cidpress)
         self.fig.canvas.mpl_disconnect(self.cidmotion)
+        self.fig.canvas.mpl_disconnect(self.cidkey)
         
     def get_cursor(self):
         """Get the coordinates of the cursor"""
         return self.cursor
+
+    def _on_enter(self, event):
+        self.fig.canvas.setFocus()
+
+    def _on_key(self, event):
+        if event.key != u'ctrl+z' or len(self._artists) == 0: return
+        # Remove last dot
+        self._remove_previous_dot()
+
+    def _remove_previous_dot(self):
+        self._artists[-1].remove()
+        self._artists = self._artists[:-1]
+        self.window.points = self.window.points[:-1]
+        self.redraw()
 
     def _on_click(self, event):
         """Internal function to handle the Matplotlib click event, used to click points and set the origin position"""
@@ -113,10 +134,14 @@ class PlotCanvas(FigureCanvas):
             self.window.origin = self.get_cursor()
             return
 
+        # Get the active state from the toolbar (this is either zoom or pan)
+        # if this is not None, we do not want to place a dot
+        if self.window.plotwidget.toolbar._active is not None: return
+
         # if there is a right-click, add the coords to the points array
         if event.button.value == 1:
             self.window.points.append(self.get_cursor())
-            self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color)
+            self._artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color))
             self.redraw()
 
     def _on_motion(self, event):
@@ -219,6 +244,9 @@ class ImageWindow(QtWidgets.QMainWindow):
         origin_action = QtWidgets.QAction("&Change origin position", self)
         actionsMenu.addAction(origin_action)
         origin_action.triggered.connect(self._enable_moving_origin)
+        remove_action = QtWidgets.QAction("&Remove previously clicked dot", self)
+        actionsMenu.addAction(remove_action)
+        remove_action.triggered.connect(self.plotwidget.canvas._remove_previous_dot)
         helpMenu = self.menuBar().addMenu("&Help")
         help_action = QtWidgets.QAction("&Documentation", self)
         helpMenu.addAction(help_action)
