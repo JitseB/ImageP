@@ -28,7 +28,7 @@ import numpy as np
 import sys, cv2, warnings
 warnings.filterwarnings("error")
 
-VERSION_INFO = 'version 2.1'
+VERSION_INFO = 'version 2.2'
 CHANGELOG = """Changelog:
 Version 2.2 (22 May 2021):
     - Bug fix: No dot added when in zoom or pan mode.
