@@ -412,17 +412,18 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
     """
     Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
     Parameters:
-        - 'image_path': Path to image.
-        - 'origin': Change the origin to position xy (optional).
-            If the passed origin is not in pixel units, you must pass 'pixel_origin'=False,
-            so that the origin position is calculated correctly from the entered unit size.
-            By default 'pixel_origin' is True.
+        - 'path': Path to image or video.
+        - 'origin': Change the origin to position xy (optional) (always in pixels!).
         - 'calibration': The pixel calibration array (x and y pixel size) (optional).
-        - 'color': The color used for the axis and points (optional).
+        - 'unit': The unit caused by the calibration array (pixels [px] by default).
+            If an array with the calibration values for the pixels was passed, it is recommended to also pass the corresponding unit to prevent confusion later on.
+        - 'color': The color used for the axis and points (optional) (black by default).
+        - 'alpha': The opacity of the origin axes and the dots (1 by default).
         VIDEO ONLY:
-        - 'keep_alpha': When moving to the next frame, keep the dots with this alpha-value (invisible by default).
-        - 'auto_progress': Automatically progress to the next frame after clicking.
         - 'frame': The frame to start the program from (0 by default).
+        - 'keep_alpha': When moving to the next frame, keep the dots with this alpha-value (invisible by default).
+        - 'auto_progress': Automatically progress to the next frame after clicking (false by default).
+        - 'auto_progress_frame_interval': Frames that are skipped when auto-progressing (1 frame per click by default).
 
     'origin', 'calibration' and 'unit' can also be defined from within the GUI.
    """
