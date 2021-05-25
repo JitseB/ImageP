@@ -28,11 +28,15 @@ import numpy as np
 import sys, cv2, warnings
 warnings.filterwarnings("error")
 
-VERSION_INFO = 'version 2.2'
+VERSION_INFO = 'version 2.3'
 CHANGELOG = """Changelog:
-Version 2.3 (- 2021):
+Version 2.3 (25 May 2021):
     - Bug fix: When no dots have been clicked yet, the menu ctrl+z button no longer throws an error.
     - Video files are now supported! By using the right and left arrow one can flip through the frames.
+    - Auto-progress parameter was added for videos.
+    - Added frame number to statusbar for videos.
+    - Added alpha parameters (also: keep_alpha parameter) to change axis and dot opacity.
+    - Added 'auto_progress_frame_interval' as video parameter so that frames can be skipped when auto-progressing the frames.
 Version 2.2 (22 May 2021):
     - Bug fix: No dot added when in zoom or pan mode.
     - Added ctrl+z feature to remove previously clicked dot.
@@ -56,6 +60,7 @@ DOCUMENTATION = """Please view the documentation on the <a href="https://github.
 
 class PlotWidget(QtWidgets.QWidget):
     keyPressed = QtCore.pyqtSignal(str)
+    dotClick = QtCore.pyqtSignal()
     
     """Qt widget to hold the matplotlib canvas and the tools for interacting with the plot"""
     def __init__(self, window):
@@ -85,8 +90,8 @@ class PlotCanvas(FigureCanvas):
         self.ax = self.fig.subplots()
         self.ax.set_axis_off()
         self.im = self.ax.imshow(window.image)
-        self.originvline = self.ax.axvline(self.window.origin[0], ls='--', color=self.window.color)
-        self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color)
+        self.originvline = self.ax.axvline(self.window.origin[0], ls='--', color=self.window.color, alpha=self.window.alpha)
+        self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color, alpha=self.window.alpha)
 
         self.mouse = (0, 0)
         self._artists = []
@@ -145,7 +150,8 @@ class PlotCanvas(FigureCanvas):
         # if there is a right-click, add the coords to the points array
         if event.button.value == 1:
             self.window.points.append(self.get_cursor())
-            self._artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color))
+            self._artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color, alpha=self.window.alpha))
+            self.window.plotwidget.dotClick.emit()
             self.redraw()
 
     def _on_motion(self, event):
@@ -213,7 +219,7 @@ class CalibrationDialog(QtWidgets.QDialog):
             msg.exec_()
 
 class ImageWindow(QtWidgets.QMainWindow):
-    def __init__(self, image, origin, calibration, unit, color):
+    def __init__(self, image, origin, calibration, unit, color, alpha):
         super(ImageWindow, self).__init__()
         self.image = image
         self.origin = origin
@@ -221,6 +227,7 @@ class ImageWindow(QtWidgets.QMainWindow):
         self.unit = unit # Default unit is pixels
         self.points = []
         self.color = color
+        self.alpha = alpha
         self.move_origin = False
 
     def closeEvent(self, event):
@@ -335,9 +342,12 @@ class ImageWindow(QtWidgets.QMainWindow):
                     pass # Do not do anything, it is most likely a devide by zero error
 
 class VideoWindow(ImageWindow):
-    def __init__(self, capture, origin, calibration, unit, color):
+    def __init__(self, capture, origin, calibration, unit, color, alpha, keep_alpha, frame, auto_progress, auto_progress_frame_interval):
         self.capture = capture
-        self.frame = 0
+        self.frame = frame
+        self.keep_alpha = keep_alpha
+        self.auto_progress = auto_progress
+        self.auto_progress_frame_interval = auto_progress_frame_interval
         self.max_frame = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         success, image = self.capture.read()
         if not success: raise Exception('Could not read video capture')
@@ -348,12 +358,16 @@ class VideoWindow(ImageWindow):
         if origin is not None: origin = (origin[0], image.shape[0]-origin[1]) 
         else: origin = (0, image.shape[0])
 
-        super(VideoWindow, self).__init__(image, origin, calibration, unit, color)
+        super(VideoWindow, self).__init__(image, origin, calibration, unit, color, alpha)
 
     def init_video_gui(self):
         self.init_gui()
-        # Connect to key press event
+        # Connect the events
         self.plotwidget.keyPressed.connect(self.on_key)
+        self.plotwidget.dotClick.connect(self.on_click)
+
+        self.frame_label = QtWidgets.QLabel(f'Frame: {self.frame+1}/{self.max_frame}')
+        self.statusBar.addWidget(self.frame_label)
 
     def _change_image(self, frame):
         self.capture.set(1, frame) # Set the frame number within the VideoCapture object
@@ -362,21 +376,39 @@ class VideoWindow(ImageWindow):
         # Convert image data to RGB for Matplotlib
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         self.plotwidget.canvas.im.set_array(image)
+
+        # Set frame label to correct frame number
+        self.frame_label.setText(f'Frame: {frame+1}/{self.max_frame}')
+
+        # Change the alpha value of the dots to 'keep_alpha's value
+        for artist in self.plotwidget.canvas._artists:
+            artist.set_alpha(self.keep_alpha)
+
+        # Redraw the canvas
         self.plotwidget.canvas.redraw()
         return True
 
     def on_key(self, key):
-        if key == 'right' and self.frame < self.max_frame:
+        if key == 'right' and self.frame < self.max_frame - 1:
             # Move frame forward, if successful, change the object variable
             if self._change_image(self.frame + 1): self.frame += 1
         elif key == 'left' and self.frame > 0:
             # Move frame backward, if successful, change the object variable
             if self._change_image(self.frame - 1): self.frame -= 1
 
-    def disconnect(self):
-        self.plotwidget.canvas.fig.canvas.mpl_disconnect(self.cidkey)
+    def on_click(self):
+        # If 'auto_progress' is true, move to next frame
+        if self.auto_progress and self._change_image(self.frame + self.auto_progress_frame_interval): 
+            self.frame += self.auto_progress_frame_interval
+        else:
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Critical)
+            msg.setText('Cannot move any further!')
+            msg.setInformativeText('You ran out of frames to click.')
+            msg.setWindowTitle('ImageP Error')
+            msg.exec_()
 
-def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
+def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1, keep_alpha=0, frame=0, auto_progress=False, auto_progress_frame_interval=1):
     """
     Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
     Parameters:
@@ -387,6 +419,10 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
             By default 'pixel_origin' is True.
         - 'calibration': The pixel calibration array (x and y pixel size) (optional).
         - 'color': The color used for the axis and points (optional).
+        VIDEO ONLY:
+        - 'keep_alpha': When moving to the next frame, keep the dots with this alpha-value (invisible by default).
+        - 'auto_progress': Automatically progress to the next frame after clicking.
+        - 'frame': The frame to start the program from (0 by default).
 
     'origin', 'calibration' and 'unit' can also be defined from within the GUI.
    """
@@ -408,7 +444,7 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
         # Use previous instance if available
         if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
         else: app = QtWidgets.QApplication.instance()
-        window = ImageWindow(image, origin, calibration, unit, color)
+        window = ImageWindow(image, origin, calibration, unit, color, alpha)
         window.init_gui()
         window.show()
         app.exec_()
@@ -418,12 +454,12 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
     except Exception as e:
         # If it is not an image, try to load the video
         capture = cv2.VideoCapture(path)
-        if not capture.isOpened(): raise FileNotFoundError
+        if not capture.isOpened(): raise FileNotFoundError('The specified file could not be found (or loaded)')
         # Launch the GUI application
         # Use previous instance if available
         if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
         else: app = QtWidgets.QApplication.instance()
-        window = VideoWindow(capture, origin, calibration, unit, color)
+        window = VideoWindow(capture, origin, calibration, unit, color, alpha, keep_alpha, frame, auto_progress, auto_progress_frame_interval)
         window.init_video_gui()
         window.show()
         app.exec_()
@@ -433,4 +469,5 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
 
 # Test the application with a test image
 if __name__ == '__main__':
-    print(gui('./test.mp4', color='white'))
+    print(gui('./test.png', color='white'))
+    print(gui('./test.avi', color='blue', alpha=0.5, keep_alpha=0.2, frame=3000, auto_progress=True, auto_progress_frame_interval=10))
