@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
@@ -30,6 +30,9 @@ warnings.filterwarnings("error")
 
 VERSION_INFO = 'version 2.2'
 CHANGELOG = """Changelog:
+Version 2.3 (- 2021):
+    - Bug fix: When no dots have been clicked yet, the menu ctrl+z button no longer throws an error.
+    - Video files are now supported! By using the right and left arrow one can flip through the frames.
 Version 2.2 (22 May 2021):
     - Bug fix: No dot added when in zoom or pan mode.
     - Added ctrl+z feature to remove previously clicked dot.
@@ -52,6 +55,8 @@ Version 1.0 (9 May 2021):
 DOCUMENTATION = """Please view the documentation on the <a href="https://github.com/JitseB/ImageP/blob/main/DOCUMENTATION.md">GitHub repository</a>."""
 
 class PlotWidget(QtWidgets.QWidget):
+    keyPressed = QtCore.pyqtSignal(str)
+    
     """Qt widget to hold the matplotlib canvas and the tools for interacting with the plot"""
     def __init__(self, window):
         QtWidgets.QWidget.__init__(self)
@@ -79,7 +84,7 @@ class PlotCanvas(FigureCanvas):
 
         self.ax = self.fig.subplots()
         self.ax.set_axis_off()
-        self.ax.imshow(window.image)
+        self.im = self.ax.imshow(window.image)
         self.originvline = self.ax.axvline(self.window.origin[0], ls='--', color=self.window.color)
         self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color)
 
@@ -98,7 +103,6 @@ class PlotCanvas(FigureCanvas):
         self.cidpress = self.fig.canvas.mpl_connect('button_press_event', self._on_click)
         self.cidmotion = self.fig.canvas.mpl_connect('motion_notify_event', self._on_motion)
         self.cidkey = self.fig.canvas.mpl_connect('key_press_event', self._on_key)
-        self.cidenter = self.fig.canvas.mpl_connect('axes_enter_event', self._on_enter)
 
     def disconnect(self):
         """Disconnect from all used Matplotlib events"""
@@ -110,15 +114,15 @@ class PlotCanvas(FigureCanvas):
         """Get the coordinates of the cursor"""
         return self.cursor
 
-    def _on_enter(self, event):
-        self.fig.canvas.setFocus()
-
     def _on_key(self, event):
-        if event.key != u'ctrl+z' or len(self._artists) == 0: return
+        self.window.plotwidget.keyPressed.emit(event.key)
+
+        if event.key != u'ctrl+z': return
         # Remove last dot
         self._remove_previous_dot()
 
     def _remove_previous_dot(self):
+        if len(self._artists) == 0: return
         self._artists[-1].remove()
         self._artists = self._artists[:-1]
         self.window.points = self.window.points[:-1]
@@ -218,13 +222,12 @@ class ImageWindow(QtWidgets.QMainWindow):
         self.points = []
         self.color = color
         self.move_origin = False
-        self._init_gui()
 
     def closeEvent(self, event):
         # Needed to properly quit when running in IPython console / Spyder IDE
         QtWidgets.QApplication.quit()
 
-    def _init_gui(self):
+    def init_gui(self):
         """Internal function that creates the GUI"""
         self.setGeometry(100, 100, 900, 650)
         self.setWindowTitle('ImageP ' + VERSION_INFO)
@@ -264,6 +267,9 @@ class ImageWindow(QtWidgets.QMainWindow):
         self.statusBar.addWidget(self.dist_label)
         self.angle_label = QtWidgets.QLabel('Angle: -')
         self.statusBar.addWidget(self.angle_label)
+
+        # Focus canvas for keyboard functionality. This has to be done at the end
+        self.plotwidget.canvas.fig.canvas.setFocus()
 
     def get_relative_calibrated(self, point):
         """Get point position relative to origin and apply calibration"""
@@ -328,6 +334,48 @@ class ImageWindow(QtWidgets.QMainWindow):
                 except RuntimeWarning:
                     pass # Do not do anything, it is most likely a devide by zero error
 
+class VideoWindow(ImageWindow):
+    def __init__(self, capture, origin, calibration, unit, color):
+        self.capture = capture
+        self.frame = 0
+        self.max_frame = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        success, image = self.capture.read()
+        if not success: raise Exception('Could not read video capture')
+        # Convert image data to RGB for Matplotlib
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # The origin point was returned calibrated from the (0, 0) origin, we have to compensate for that...
+        if origin is not None: origin = (origin[0], image.shape[0]-origin[1]) 
+        else: origin = (0, image.shape[0])
+
+        super(VideoWindow, self).__init__(image, origin, calibration, unit, color)
+
+    def init_video_gui(self):
+        self.init_gui()
+        # Connect to key press event
+        self.plotwidget.keyPressed.connect(self.on_key)
+
+    def _change_image(self, frame):
+        self.capture.set(1, frame) # Set the frame number within the VideoCapture object
+        success, image = self.capture.read()
+        if not success: return False
+        # Convert image data to RGB for Matplotlib
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        self.plotwidget.canvas.im.set_array(image)
+        self.plotwidget.canvas.redraw()
+        return True
+
+    def on_key(self, key):
+        if key == 'right' and self.frame < self.max_frame:
+            # Move frame forward, if successful, change the object variable
+            if self._change_image(self.frame + 1): self.frame += 1
+        elif key == 'left' and self.frame > 0:
+            # Move frame backward, if successful, change the object variable
+            if self._change_image(self.frame - 1): self.frame -= 1
+
+    def disconnect(self):
+        self.plotwidget.canvas.fig.canvas.mpl_disconnect(self.cidkey)
+
 def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
     """
     Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
@@ -361,23 +409,28 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black'):
         if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
         else: app = QtWidgets.QApplication.instance()
         window = ImageWindow(image, origin, calibration, unit, color)
+        window.init_gui()
         window.show()
         app.exec_()
         
         # Return the calibrated points
         return window.get_calibrated_points()
     except Exception as e:
-        raise e
         # If it is not an image, try to load the video
-        print('Video files are not supported yet!')
-        # cap = cv2.VideoCapture(path)
-        # if not cap.isOpened(): raise FileNotFoundError
-        # app = QtWidgets.QApplication([])
-        # window = VideoWindow(cap, origin, calibration, color)
-        # window.show()
-        # app.exec_()
-        # TODO: Return the calibrated points
+        capture = cv2.VideoCapture(path)
+        if not capture.isOpened(): raise FileNotFoundError
+        # Launch the GUI application
+        # Use previous instance if available
+        if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
+        else: app = QtWidgets.QApplication.instance()
+        window = VideoWindow(capture, origin, calibration, unit, color)
+        window.init_video_gui()
+        window.show()
+        app.exec_()
+        
+        # Return the calibrated points
+        return window.get_calibrated_points()
 
 # Test the application with a test image
 if __name__ == '__main__':
-    print(gui('./test.png', color='white'))
+    print(gui('./test.mp4', color='white'))
