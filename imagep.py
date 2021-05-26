@@ -28,8 +28,11 @@ import numpy as np
 import sys, cv2, warnings
 warnings.filterwarnings("error")
 
-VERSION_INFO = 'version 2.3'
+VERSION_INFO = 'version 2.4'
 CHANGELOG = """Changelog:
+Version 2.4 (26 May 2021):
+    - Refactoring.
+    - Bug fix: When setting the 'frame' parameter, the initial frame now corresponds to this value.
 Version 2.3 (25 May 2021):
     - Bug fix: When no dots have been clicked yet, the menu ctrl+z button no longer throws an error.
     - Video files are now supported! By using the right and left arrow one can flip through the frames.
@@ -94,7 +97,7 @@ class PlotCanvas(FigureCanvas):
         self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color, alpha=self.window.alpha)
 
         self.mouse = (0, 0)
-        self._artists = []
+        self.artists = []
 
         # Connect to all necessary events
         self.connect()
@@ -127,9 +130,9 @@ class PlotCanvas(FigureCanvas):
         self._remove_previous_dot()
 
     def _remove_previous_dot(self):
-        if len(self._artists) == 0: return
-        self._artists[-1].remove()
-        self._artists = self._artists[:-1]
+        if len(self.artists) == 0: return
+        self.artists[-1].remove()
+        self.artists = self.artists[:-1]
         self.window.points = self.window.points[:-1]
         self.redraw()
 
@@ -150,7 +153,7 @@ class PlotCanvas(FigureCanvas):
         # if there is a right-click, add the coords to the points array
         if event.button.value == 1:
             self.window.points.append(self.get_cursor())
-            self._artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color, alpha=self.window.alpha))
+            self.artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color, alpha=self.window.alpha))
             self.window.plotwidget.dotClick.emit()
             self.redraw()
 
@@ -210,7 +213,7 @@ class CalibrationDialog(QtWidgets.QDialog):
         try:
             self.get_xy_calibration()
             self.accept()
-        except Exception:
+        except Exception as e:
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Critical)
             msg.setText('An error occurred!')
@@ -219,6 +222,7 @@ class CalibrationDialog(QtWidgets.QDialog):
             msg.exec_()
 
 class ImageWindow(QtWidgets.QMainWindow):
+    """Class for the image window of ImageP"""
     def __init__(self, image, origin, calibration, unit, color, alpha):
         super(ImageWindow, self).__init__()
         self.image = image
@@ -247,33 +251,32 @@ class ImageWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.plotwidget)
 
         # Add menu items
-        actionsMenu = self.menuBar().addMenu("&Actions")
-        calibrate_action = QtWidgets.QAction("&Calibrate", self)
-        actionsMenu.addAction(calibrate_action)
-        calibrate_action.triggered.connect(self._show_calibration_dialog)
-        origin_action = QtWidgets.QAction("&Change origin position", self)
-        actionsMenu.addAction(origin_action)
-        origin_action.triggered.connect(self._enable_moving_origin)
-        remove_action = QtWidgets.QAction("&Remove previously clicked dot", self)
-        actionsMenu.addAction(remove_action)
-        remove_action.triggered.connect(self.plotwidget.canvas._remove_previous_dot)
-        helpMenu = self.menuBar().addMenu("&Help")
-        help_action = QtWidgets.QAction("&Documentation", self)
-        helpMenu.addAction(help_action)
-        help_action.triggered.connect(self._show_documentation_popup)
-        about_action = QtWidgets.QAction("&About and credits", self)
-        helpMenu.addAction(about_action)
-        about_action.triggered.connect(self._show_about_popup)
+        def _add_action(menu, text, function):
+            """Small internal function to add an action to a menu with a certain trigger function"""
+            # Solely made to clean up the codebase
+            action = QtWidgets.QAction(text, self)
+            menu.addAction(action)
+            action.triggered.connect(function)
+
+        actions = self.menuBar().addMenu('&Actions')
+        _add_action(actions, '&Calibrate', self._show_calibration_dialog)
+        _add_action(actions, '&Move origin', self._enable_moving_origin)
+
+        help = self.menuBar().addMenu('&Help')
+        _add_action(help, '&Documentation', self._show_documentation_popup)
+        _add_action(help, '&Keyboard shortcuts', self._show_keymap_popup)
+        _add_action(help, '&About and credits', self._show_about_popup)
 
         # Add status bar items
-        self.statusBar = QtWidgets.QStatusBar()
-        self.setStatusBar(self.statusBar)
+        self.statusbar = QtWidgets.QStatusBar()
+        self.setStatusBar(self.statusbar)
+
         self.mouse_position_label = QtWidgets.QLabel(f'Position: -')
-        self.statusBar.addWidget(self.mouse_position_label)
+        self.statusbar.addWidget(self.mouse_position_label)
         self.dist_label = QtWidgets.QLabel('Distance: -')
-        self.statusBar.addWidget(self.dist_label)
+        self.statusbar.addWidget(self.dist_label)
         self.angle_label = QtWidgets.QLabel('Angle: -')
-        self.statusBar.addWidget(self.angle_label)
+        self.statusbar.addWidget(self.angle_label)
 
         # Focus canvas for keyboard functionality. This has to be done at the end
         self.plotwidget.canvas.fig.canvas.setFocus()
@@ -309,6 +312,17 @@ class ImageWindow(QtWidgets.QMainWindow):
         msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
         msg.exec_()
 
+    def _show_keymap_popup(self):
+        """Internal function to show the keymap window"""
+        msg = QtWidgets.QMessageBox()
+        msg.setIcon(QtWidgets.QMessageBox.Information)
+
+        msg.setText('Keyboard shortcuts')
+        msg.setInformativeText('Use ctrl+z to remove the previously clicked dot.\nUse the arrow keys to move through the frames of a video file.')
+        msg.setWindowTitle('ImageP Keymap')
+        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+        msg.exec_()
+
     def _show_calibration_dialog(self):
         """Internal function to show the calibration dialog"""
         dialog = CalibrationDialog()
@@ -338,10 +352,11 @@ class ImageWindow(QtWidgets.QMainWindow):
                 try:
                     angle = np.arccos((distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB))*180/np.pi
                     self.angle_label.setText(f'Angle: {angle:.2f} deg')
-                except RuntimeWarning:
+                except RuntimeWarning as w:
                     pass # Do not do anything, it is most likely a devide by zero error
 
 class VideoWindow(ImageWindow):
+    """Class for the video window of ImageP"""
     def __init__(self, capture, origin, calibration, unit, color, alpha, keep_alpha, frame, auto_progress, auto_progress_frame_interval):
         self.capture = capture
         self.frame = frame
@@ -349,6 +364,7 @@ class VideoWindow(ImageWindow):
         self.auto_progress = auto_progress
         self.auto_progress_frame_interval = auto_progress_frame_interval
         self.max_frame = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.capture.set(1, frame) # Set the frame number within the VideoCapture object
         success, image = self.capture.read()
         if not success: raise Exception('Could not read video capture')
         # Convert image data to RGB for Matplotlib
@@ -361,15 +377,20 @@ class VideoWindow(ImageWindow):
         super(VideoWindow, self).__init__(image, origin, calibration, unit, color, alpha)
 
     def init_video_gui(self):
+        """Initialize the video GUI"""
+        # First initialize the image GUI, then add to that:
         self.init_gui()
+
         # Connect the events
         self.plotwidget.keyPressed.connect(self.on_key)
         self.plotwidget.dotClick.connect(self.on_click)
 
+        # Add an extra label for the frame number to the status bar
         self.frame_label = QtWidgets.QLabel(f'Frame: {self.frame+1}/{self.max_frame}')
-        self.statusBar.addWidget(self.frame_label)
+        self.statusbar.addWidget(self.frame_label)
 
     def _change_image(self, frame):
+        """Internal function to change the frame currently visible"""
         self.capture.set(1, frame) # Set the frame number within the VideoCapture object
         success, image = self.capture.read()
         if not success: return False
@@ -381,7 +402,7 @@ class VideoWindow(ImageWindow):
         self.frame_label.setText(f'Frame: {frame+1}/{self.max_frame}')
 
         # Change the alpha value of the dots to 'keep_alpha's value
-        for artist in self.plotwidget.canvas._artists:
+        for artist in self.plotwidget.canvas.artists:
             artist.set_alpha(self.keep_alpha)
 
         # Redraw the canvas
@@ -389,6 +410,7 @@ class VideoWindow(ImageWindow):
         return True
 
     def on_key(self, key):
+        """Internal function as listener for the key press event from Matplotlib"""
         if key == 'right' and self.frame < self.max_frame - 1:
             # Move frame forward, if successful, change the object variable
             if self._change_image(self.frame + 1): self.frame += 1
@@ -397,6 +419,7 @@ class VideoWindow(ImageWindow):
             if self._change_image(self.frame - 1): self.frame -= 1
 
     def on_click(self):
+        """Internal function as listener for the button click event from Matplotlib, only triggers when a dot is placed"""
         # If 'auto_progress' is true, move to next frame
         if self.auto_progress and self._change_image(self.frame + self.auto_progress_frame_interval): 
             self.frame += self.auto_progress_frame_interval
@@ -470,5 +493,10 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
 
 # Test the application with a test image
 if __name__ == '__main__':
-    print(gui('./test.png', color='white'))
-    print(gui('./test.avi', color='blue', alpha=0.5, keep_alpha=0.2, frame=3000, auto_progress=True, auto_progress_frame_interval=10))
+    import matplotlib.pyplot as plt
+    plt.figure()
+    points = gui('./test.avi', color='blue', alpha=0.5, keep_alpha=0.2, frame=2000, auto_progress=True, auto_progress_frame_interval=10)
+    plt.scatter(points[:,0], points[:, 1], label='data', color='gray')
+    plt.legend()
+    plt.grid()
+    plt.show()
