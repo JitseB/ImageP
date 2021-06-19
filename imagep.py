@@ -106,8 +106,7 @@ class PlotWidget(QtWidgets.QWidget):
         self.lut.setImageItem(self.img)
         
         # Settings (with title)
-        label = QtGui.QLabel('Image post-processing')
-        label.setStyleSheet("font-weight:bold;text-align:center")
+        label = QtGui.QLabel('<span style="font-weight:bold">Keymap:</span><br><span style="text-decoration:underline">Shift-click</span>: Add new point<br><span style="text-decoration:underline">Z</span>: Remove last point<br><span style="text-decoration:underline">Left/right arrow</span>: Change frame<br><br><span style="font-weight:bold">Image post-processing:</span>')
         layout.addWidget(label, 0, 1)
         grayBox = QtGui.QCheckBox('grayscale')
         monoRadio = QtGui.QRadioButton('mono')
@@ -310,7 +309,6 @@ class ImageWindow(QtWidgets.QMainWindow):
 
         help = self.menuBar().addMenu('&Help')
         _add_action(help, '&Documentation', self._show_documentation_popup)
-        _add_action(help, '&Keyboard shortcuts', self._show_keymap_popup)
         _add_action(help, '&About and credits', self._show_about_popup)
 
         # Add status bar items
@@ -363,17 +361,6 @@ class ImageWindow(QtWidgets.QMainWindow):
         msg.setText('ImageP is a minimalistic Python version of <a href="https://imagej.nih.gov/ij/">ImageJ</a> written by and for Applied Physics students at the University of Twente. It is licensed under the MIT license.<br><br>ImageP uses <a href="https://www.riverbankcomputing.com/software/pyqt/">PyQt</a> for the GUI and <a href="https://opencv.org//">OpenCV</a> together with <a href="https://numpy.org/">NumPy</a> for file loading. <a href="https://www.pyqtgraph.org/">PyQtGraph</a> is used to display the data.<br><br>View <a href="https://github.com/JitseB/ImageP">GitHub repository</a> for updates.')
         msg.setInformativeText(CHANGELOG)
         msg.setWindowTitle('ImageP About and credits')
-        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        msg.exec_()
-
-    def _show_keymap_popup(self):
-        """Internal function to show the keymap window"""
-        msg = QtWidgets.QMessageBox()
-        msg.setIcon(QtWidgets.QMessageBox.Information)
-
-        msg.setText('Keyboard shortcuts')
-        msg.setInformativeText('Press z to remove the previously clicked dot.\nUse the arrow keys to move through the frames of a video file.')
-        msg.setWindowTitle('ImageP Keymap')
         msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
         msg.exec_()
 
@@ -454,7 +441,7 @@ class VideoWindow(ImageWindow):
     def _point_remove_last_listener(self):
         """Additional listener (see image class) so that when auto progressing, using the z-key, it goes back in time"""
         # Roll back the frames when auto-progressing is enabled
-        if self.auto_progress: self._change_frame(self.frame - self.auto_progress_frame_interval)
+        if self.auto_progress and len(self.points) > 0: self._change_frame(self.frame - self.auto_progress_frame_interval)
 
     def _change_frame(self, frame):
         """Internal function to change the frame currently visible"""

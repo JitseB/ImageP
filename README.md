@@ -8,7 +8,7 @@ Not only can it be used to process images, it can also open video files to track
 Please refer to the [documentation](https://github.com/JitseB/ImageP/blob/main/DOCUMENTATION.md) for a clear example on how to use the class properly.
 
 A screenshot of the window can be seen below:
-![window-screenshot](https://i.imgur.com/Pvk58Ff.png)
+![window-screenshot](https://i.imgur.com/eQE1AKj.png)
 
 ### The 'gui' function
 Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
