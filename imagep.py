@@ -69,7 +69,7 @@ class PlotWidget(QtWidgets.QWidget):
     origin_change_event = QtCore.pyqtSignal(tuple)
     mouse_move_event = QtCore.pyqtSignal(tuple)
     
-    """Qt widget to hold the PyQtGraph canvas and the tools for interacting with the plot"""
+    """Qt widget to hold the PyQtGraph widget and the tools for interacting with the plot"""
     def __init__(self, window):
         QtWidgets.QWidget.__init__(self)
         self.image = np.flipud(np.rot90(window.image))
@@ -182,15 +182,18 @@ class PlotWidget(QtWidgets.QWidget):
         if self._shift_active: self.point_add_event.emit((pos.x(), pos.y()))
 
     def update_points(self, points):
+        """Update the scatter plot with the points"""
         self.scatter.setData(pos=points)
 
     # Plot widget functions
     def set_origin(self, position):
+        """Change the origin's position to a new location"""
         self.origin = position
         self.origin_hline.setPos(position[0])
         self._origin_vline.setPos(position[1])
 
     def set_image(self, image):
+        """Change the current image that is shown"""
         self.image = np.flipud(np.rot90(image))
         # Set image on the view and copy over the levels (LUT)
         levels = self.lut.getLevels()
@@ -268,9 +271,11 @@ class ImageWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.quit()
 
     def keyPressEvent(self, event):
+        """Event for key press"""
         self.key_press_event.emit(event.key())
 
     def keyReleaseEvent(self, event):
+        """Event for key release"""
         self.key_release_event.emit(event.key())
 
     def init_gui(self):
@@ -320,11 +325,13 @@ class ImageWindow(QtWidgets.QMainWindow):
         self.statusbar.addWidget(self.angle_label)
 
     def point_remove_last_listener(self):
+        """Remove that last clicked point (operated with z-key)"""
         if len(self.points) > 0: 
             self.points = self.points[:-1]
             self.plotwidget.update_points(self.points)
 
     def point_add_listener(self, point):
+        """When a point is clicked, add it to the list and update the scatter plot"""
         self.points.append(point)
         self.plotwidget.update_points(self.points)
 
@@ -353,7 +360,7 @@ class ImageWindow(QtWidgets.QMainWindow):
         msg = QtWidgets.QMessageBox()
         msg.setIcon(QtWidgets.QMessageBox.Information)
 
-        msg.setText('ImageP is a minimalistic Python version of <a href="https://imagej.nih.gov/ij/">ImageJ</a> written by and for Applied Physics students at the University of Twente. It is licensed under the MIT license.<br><br>ImageP uses <a href="https://www.riverbankcomputing.com/software/pyqt/">PyQt</a> for the GUI and <a href="https://opencv.org//">OpenCV</a> together with <a href="https://numpy.org/">NumPy</a> for file loading.<br><br>View <a href="https://github.com/JitseB/ImageP">GitHub repository</a> for updates.')
+        msg.setText('ImageP is a minimalistic Python version of <a href="https://imagej.nih.gov/ij/">ImageJ</a> written by and for Applied Physics students at the University of Twente. It is licensed under the MIT license.<br><br>ImageP uses <a href="https://www.riverbankcomputing.com/software/pyqt/">PyQt</a> for the GUI and <a href="https://opencv.org//">OpenCV</a> together with <a href="https://numpy.org/">NumPy</a> for file loading. <a href="https://www.pyqtgraph.org/">PyQtGraph</a> is used to display the data.<br><br>View <a href="https://github.com/JitseB/ImageP">GitHub repository</a> for updates.')
         msg.setInformativeText(CHANGELOG)
         msg.setWindowTitle('ImageP About and credits')
         msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
@@ -440,10 +447,12 @@ class VideoWindow(ImageWindow):
         self.statusbar.addWidget(self.frame_label)
 
     def _key_press_listener(self, key):
+        """Listener for key press event so that the user can move through the frames"""
         if key == QtCore.Qt.Key_Right and self.frame < self.max_frame: self._change_frame(self.frame+1)
         elif key == QtCore.Qt.Key_Left and self.frame > 0:  self._change_frame(self.frame-1)
 
     def _point_remove_last_listener(self):
+        """Additional listener (see image class) so that when auto progressing, using the z-key, it goes back in time"""
         # Roll back the frames when auto-progressing is enabled
         if self.auto_progress: self._change_frame(self.frame - self.auto_progress_frame_interval)
 
@@ -462,7 +471,7 @@ class VideoWindow(ImageWindow):
         return True
 
     def _auto_progress_handler(self, _):
-        """Internal function as listener for the button click event from Matplotlib, only triggers when a dot is placed"""
+        """Internal function as listener for the button click event from PyQtGraph, only triggers when a point is placed"""
         # If 'auto_progress' is true, move to next frame
         if self.auto_progress and not self._change_frame(self.frame + self.auto_progress_frame_interval): 
             msg = QtWidgets.QMessageBox()
@@ -532,5 +541,5 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='w', frame=0, au
 
 # Test the application with a test image
 if __name__ == '__main__':
-    points = gui('./test.jpg', color='w', frame=2000, auto_progress=True, auto_progress_frame_interval=10)
+    points = gui('./test.avi', color='w', frame=2000, auto_progress=True, auto_progress_frame_interval=10)
     print(points)
