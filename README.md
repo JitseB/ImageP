@@ -19,7 +19,9 @@ Parameters:
 - `calibration`: The pixel calibration array (x and y pixel size) (optional).
 - `unit`: The unit caused by the calibration array (pixels by default).
     If an array with the calibration values for the pixels was passed, it is recommended to also pass the corresponding unit to prevent confusion later on.
-- `color`: The color used for the axis and points (optional) (black by default).
+- `color`: The color used for the axis and points (optional) (white by default).
+
+The color parameter might not act the way you are used to, it uses the PyQt colors. You can choose from the default set of string colors: b, g, r, c, m, y, k, w and alternatively you can pass a tuple of (r,g,b)-values or (r,g,b,a)-values if you want to add an alpha value.
 
 **VIDEO ONLY**:
 - `frame`: The frame to start the program from (0 by default).
@@ -28,7 +30,7 @@ Parameters:
 
 `origin`, `calibration` and `unit` can also be defined from within the GUI.
 
-When the GUI is opened, you can use `ctrl+z` to remove the previously clicked point and the arrows (left and right) can be used to move through the frames when a video file is passed through the `gui` function parameters.
+When the GUI is opened, you can use `z` to remove the previously clicked point and the arrows (left and right) can be used to move through the frames when a video file is passed through the `gui` function parameters. `Shift-click` to add a new point.
 
 ## Copyright
 ImageP is published under the [MIT license](https://github.com/JitseB/ImageP/blob/main/LICENSE.md).
