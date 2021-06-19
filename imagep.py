@@ -21,15 +21,17 @@
 # SOFTWARE.
 
 from PyQt5 import QtWidgets, QtGui, QtCore
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-import matplotlib.pyplot as plt
+import pyqtgraph as pg
 import numpy as np
 import sys, cv2, warnings
 warnings.filterwarnings("error")
 
-VERSION_INFO = 'version 2.4'
+VERSION_INFO = 'version 2.5'
 CHANGELOG = """Changelog:
+Version 2.5 (19 June 2021):
+    - Swapped out Matplotlib for PyQtGraph for better video performance.
+    - Added LUT (lookup-table) to change different levels of red-green-blue.
+    - Added image/frame grayscale converter as tickbox in the GUI.
 Version 2.4 (26 May 2021):
     - Refactoring.
     - Bug fix: When setting the 'frame' parameter, the initial frame now corresponds to this value.
@@ -62,114 +64,140 @@ Version 1.0 (9 May 2021):
 DOCUMENTATION = """Please view the documentation on the <a href="https://github.com/JitseB/ImageP/blob/main/DOCUMENTATION.md">GitHub repository</a>."""
 
 class PlotWidget(QtWidgets.QWidget):
-    keyPressed = QtCore.pyqtSignal(str)
-    dotClick = QtCore.pyqtSignal()
+    point_add_event = QtCore.pyqtSignal(tuple)
+    point_remove_last_event = QtCore.pyqtSignal()
+    origin_change_event = QtCore.pyqtSignal(tuple)
+    mouse_move_event = QtCore.pyqtSignal(tuple)
     
-    """Qt widget to hold the matplotlib canvas and the tools for interacting with the plot"""
+    """Qt widget to hold the PyQtGraph canvas and the tools for interacting with the plot"""
     def __init__(self, window):
         QtWidgets.QWidget.__init__(self)
-
-        self.setLayout(QtWidgets.QVBoxLayout())
-        self.canvas = PlotCanvas(window)
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        self.toolbar.addSeparator()
-
-        self.toolbar.addSeparator()
-        self.layout().addWidget(self.toolbar)
-        self.layout().addWidget(self.canvas)
-
-class PlotCanvas(FigureCanvas):
-    """Class to hold a canvas with a matplotlib figure with the image matrix and origin lines"""
-    def __init__(self, window):
-        self.window = window
-
-        # setup the FigureCanvas
-        self.fig = plt.Figure()
-        self.fig.set_tight_layout({"pad": 0.0}) # Remove the axes
-        FigureCanvas.__init__(self, self.fig)
-        FigureCanvas.setSizePolicy(self, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        FigureCanvas.updateGeometry(self)
-
-        self.ax = self.fig.subplots()
-        self.ax.set_axis_off()
-        self.im = self.ax.imshow(window.image)
-        self.originvline = self.ax.axvline(self.window.origin[0], ls='--', color=self.window.color, alpha=self.window.alpha)
-        self.originhline = self.ax.axhline(self.window.origin[1], ls='--', color=self.window.color, alpha=self.window.alpha)
-
-        self.mouse = (0, 0)
-        self.artists = []
-
-        # Connect to all necessary events
-        self.connect()
-
-    def redraw(self):
-        """Redraw the canvas"""
-        self.fig.canvas.draw()
-
-    def connect(self):
-        """Connect to all necessary Matplotlib events"""
-        self.cidpress = self.fig.canvas.mpl_connect('button_press_event', self._on_click)
-        self.cidmotion = self.fig.canvas.mpl_connect('motion_notify_event', self._on_motion)
-        self.cidkey = self.fig.canvas.mpl_connect('key_press_event', self._on_key)
-
-    def disconnect(self):
-        """Disconnect from all used Matplotlib events"""
-        self.fig.canvas.mpl_disconnect(self.cidpress)
-        self.fig.canvas.mpl_disconnect(self.cidmotion)
-        self.fig.canvas.mpl_disconnect(self.cidkey)
+        self.image = np.flipud(np.rot90(window.image))
+        self.color = window.color
+        self._shift_active = False
+        self.origin_move_active = False
+        self._grayscale_active = False
         
-    def get_cursor(self):
-        """Get the coordinates of the cursor"""
-        return self.cursor
+        self.canvas = pg.ImageView()
 
-    def _on_key(self, event):
-        self.window.plotwidget.keyPressed.emit(event.key)
+        # Use a grid layout for the plot, LUT and settings (with title)
+        # Since the settings and LUT only need local referencing, we do not have to create a seperate class
+        layout = QtGui.QGridLayout()
+        self.setLayout(layout)
 
-        if event.key != u'ctrl+z': return
-        # Remove last dot
-        self._remove_previous_dot()
+        self.lut = pg.HistogramLUTWidget()
+        layout.addWidget(self.lut, 1, 1)
 
-    def _remove_previous_dot(self):
-        if len(self.artists) == 0: return
-        self.artists[-1].remove()
-        self.artists = self.artists[:-1]
-        self.window.points = self.window.points[:-1]
-        self.redraw()
+        self._plt = pg.plot()
+        self._plt.setAspectLocked(True)
 
-    def _on_click(self, event):
-        """Internal function to handle the Matplotlib click event, used to click points and set the origin position"""
-        if not event.xdata or not event.ydata: return
+        self.img = pg.ImageItem(self.image)
+        self.img.setZValue(-10)
 
-        # If the origin was moving, lock it in place
-        if self.window.move_origin:
-            self.window.move_origin = False
-            self.window.origin = self.get_cursor()
+        self.scatter = pg.ScatterPlotItem(pen=None, brush=pg.mkBrush(self.color))
+        self._plt.addItem(self.scatter)
+
+        self._plt.addItem(self.img)
+        self._plt.invertY(True) # Vertical axis counts top to bottom
+        self._plt.hideAxis('left')
+        self._plt.hideAxis('bottom')
+        layout.addWidget(self._plt, 0, 0, 5, 1)
+
+        self.lut.setImageItem(self.img)
+        
+        # Settings (with title)
+        label = QtGui.QLabel('Image post-processing')
+        label.setStyleSheet("font-weight:bold;text-align:center")
+        layout.addWidget(label, 0, 1)
+        grayBox = QtGui.QCheckBox('grayscale')
+        monoRadio = QtGui.QRadioButton('mono')
+        rgbaRadio = QtGui.QRadioButton('rgba')
+        grayBox = QtGui.QCheckBox('grayscale')
+        layout.addWidget(monoRadio, 2, 1)
+        layout.addWidget(rgbaRadio, 3, 1)
+        layout.addWidget(grayBox, 4, 1)
+        monoRadio.setChecked(True)
+
+        # Grayscale click action
+        def setGrayscale(state):
+            if state == QtCore.Qt.Checked:
+                # Convert rgb image to gray image using std formula
+                self.img.setImage(np.dot(self.image[...,:3], [0.299, 0.587, 0.114]))
+                monoRadio.setChecked(True)
+                rgbaRadio.setChecked(False)
+                rgbaRadio.setEnabled(False)
+                self._grayscale_active = True
+            else:
+                self.img.setImage(self.image)
+                rgbaRadio.setEnabled(True)
+                self._grayscale_active = False
+        
+        # Connect state change events to their functions
+        grayBox.stateChanged.connect(setGrayscale)
+        monoRadio.toggled.connect(lambda _: self.lut.setLevelMode('mono' if monoRadio.isChecked() else 'rgba'))
+
+        # Disable the grayscale and rgb buttons if the image dooes not have rgb data
+        if len(self.image.shape) < 3: 
+            grayBox.setEnabled(False)
+            rgbaRadio.setEnabled(False)
+
+        # Origin lines
+        self._origin_vline = pg.InfiniteLine(angle=90, pos=window.origin[0], pen=self.color, movable=False)
+        self._origin_hline = pg.InfiniteLine(angle=0, pos=window.origin[1], pen=self.color, movable=False)
+        self._plt.addItem(self._origin_vline, ignoreBounds=True)
+        self._plt.addItem(self._origin_hline, ignoreBounds=True)
+
+        # Connect the signal proxies and events
+        self._mouse_move_proxy = pg.SignalProxy(self._plt.scene().sigMouseMoved, rateLimit=60, slot=self._mouse_move_handler)
+        self._mouse_click_proxy = pg.SignalProxy(self._plt.scene().sigMouseClicked, rateLimit=60, slot=self._mouse_click_handler)
+        window.key_press_event.connect(self._key_press_handler)
+        window.key_release_event.connect(self._key_release_handler)
+
+    # Event handlers
+    def _key_press_handler(self, key):
+        if key == QtCore.Qt.Key_Shift: self._shift_active = True
+        elif key == QtCore.Qt.Key_Z: self.point_remove_last_event.emit()
+        
+    def _key_release_handler(self, key):
+        if key == QtCore.Qt.Key_Shift: self._shift_active = False
+
+    def _mouse_move_handler(self, event):
+        pos = event[0] # Using signal proxy turns original arguments into a tuple
+        if self._plt.sceneBoundingRect().contains(pos):
+            mouse_position = self._plt.plotItem.vb.mapSceneToView(pos)
+            self.mouse_move_event.emit((mouse_position.x(), mouse_position.y()))
+
+            if self.origin_move_active:
+                self._origin_hline.setPos(mouse_position.y())
+                self._origin_vline.setPos(mouse_position.x())
+                self.origin_change_event.emit((mouse_position.x(), mouse_position.y()))
+
+    def _mouse_click_handler(self, event):
+        if event[0] == None: return # Prevent attribute error
+        pos = event[0].pos() # Using signal proxy turns original arguments into a tuple
+        if self.origin_move_active:
+            self.origin_move_active = False
             return
 
-        # Get the active state from the toolbar (this is either zoom or pan)
-        # if this is not None, we do not want to place a dot
-        if self.window.plotwidget.toolbar._active is not None: return
+        if self._shift_active: self.point_add_event.emit((pos.x(), pos.y()))
 
-        # if there is a right-click, add the coords to the points array
-        if event.button.value == 1:
-            self.window.points.append(self.get_cursor())
-            self.artists.append(self.ax.scatter(event.xdata, event.ydata, marker='.', color=self.window.color, alpha=self.window.alpha))
-            self.window.plotwidget.dotClick.emit()
-            self.redraw()
+    def update_points(self, points):
+        self.scatter.setData(pos=points)
 
-    def _on_motion(self, event):
-        """Internal function to handle the Matplotlib motion event, used to track the cursor for the origin lines and statusbar"""
-        if not event.xdata or not event.ydata: return
+    # Plot widget functions
+    def set_origin(self, position):
+        self.origin = position
+        self.origin_hline.setPos(position[0])
+        self._origin_vline.setPos(position[1])
 
-        # If the origin is movable, move the lines with the cursor
-        if self.window.move_origin:
-            self.originvline.set_xdata(event.xdata)
-            self.originhline.set_ydata(event.ydata)
-            self.redraw()
-
-        # Set the mouse coordinates and update the statusbar
-        self.cursor = (event.xdata, event.ydata)
-        self.window._update_statusbar()
+    def set_image(self, image):
+        self.image = np.flipud(np.rot90(image))
+        # Set image on the view and copy over the levels (LUT)
+        levels = self.lut.getLevels()
+        self.img.setImage(self.image if not self._grayscale_active else np.dot(self.image[...,:3], [0.299, 0.587, 0.114]))
+        if self.lut.levelMode == 'mono': self.lut.setLevels(min=levels[0], max=levels[1])
+        else: self.lut.setLevels(rgba=levels)
+        self.lut.regionChanged() # Tell PyQtGrapg the LUT regions have changed to update the image view
 
 class CalibrationDialog(QtWidgets.QDialog):
     """Qt dialog class for the calibration popup"""
@@ -222,21 +250,28 @@ class CalibrationDialog(QtWidgets.QDialog):
             msg.exec_()
 
 class ImageWindow(QtWidgets.QMainWindow):
+    key_press_event = QtCore.pyqtSignal(int)
+    key_release_event = QtCore.pyqtSignal(int)
+
     """Class for the image window of ImageP"""
-    def __init__(self, image, origin, calibration, unit, color, alpha):
+    def __init__(self, image, origin, calibration, unit, color):
         super(ImageWindow, self).__init__()
         self.image = image
         self.origin = origin
         self.calibration = calibration
         self.unit = unit # Default unit is pixels
-        self.points = []
         self.color = color
-        self.alpha = alpha
-        self.move_origin = False
+        self.points = []
 
     def closeEvent(self, event):
         # Needed to properly quit when running in IPython console / Spyder IDE
         QtWidgets.QApplication.quit()
+
+    def keyPressEvent(self, event):
+        self.key_press_event.emit(event.key())
+
+    def keyReleaseEvent(self, event):
+        self.key_release_event.emit(event.key())
 
     def init_gui(self):
         """Internal function that creates the GUI"""
@@ -248,6 +283,12 @@ class ImageWindow(QtWidgets.QMainWindow):
         # Put plot in main layout
         layout = QtWidgets.QVBoxLayout(self._main)
         self.plotwidget = PlotWidget(self)
+
+        self.plotwidget.point_remove_last_event.connect(self.point_remove_last_listener)
+        self.plotwidget.point_add_event.connect(self.point_add_listener)
+        self.plotwidget.mouse_move_event.connect(self._update_statusbar_handler)
+        self.plotwidget.origin_change_event.connect(self._origin_change_listener)
+
         layout.addWidget(self.plotwidget)
 
         # Add menu items
@@ -278,8 +319,14 @@ class ImageWindow(QtWidgets.QMainWindow):
         self.angle_label = QtWidgets.QLabel('Angle: -')
         self.statusbar.addWidget(self.angle_label)
 
-        # Focus canvas for keyboard functionality. This has to be done at the end
-        self.plotwidget.canvas.fig.canvas.setFocus()
+    def point_remove_last_listener(self):
+        if len(self.points) > 0: 
+            self.points = self.points[:-1]
+            self.plotwidget.update_points(self.points)
+
+    def point_add_listener(self, point):
+        self.points.append(point)
+        self.plotwidget.update_points(self.points)
 
     def get_relative_calibrated(self, point):
         """Get point position relative to origin and apply calibration"""
@@ -318,7 +365,7 @@ class ImageWindow(QtWidgets.QMainWindow):
         msg.setIcon(QtWidgets.QMessageBox.Information)
 
         msg.setText('Keyboard shortcuts')
-        msg.setInformativeText('Use ctrl+z to remove the previously clicked dot.\nUse the arrow keys to move through the frames of a video file.')
+        msg.setInformativeText('Press z to remove the previously clicked dot.\nUse the arrow keys to move through the frames of a video file.')
         msg.setWindowTitle('ImageP Keymap')
         msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
         msg.exec_()
@@ -333,13 +380,16 @@ class ImageWindow(QtWidgets.QMainWindow):
 
     def _enable_moving_origin(self):
         """Internal function to enable movement of the origin"""
-        self.move_origin = True
+        self.plotwidget.origin_move_active = True
 
-    def _update_statusbar(self):
+    def _origin_change_listener(self, origin):
+        self.origin = origin
+
+    def _update_statusbar_handler(self, mouse_position):
         """Internal function to update the statusbar labels"""
         # All points (A, B and C) are measured from the origin position
         # Using cosine rule to solve angle (finding angle(CAB), so between the lines AC and AB)
-        C = self.get_relative_calibrated(self.plotwidget.canvas.get_cursor())
+        C = self.get_relative_calibrated(mouse_position)
         self.mouse_position_label.setText(f'Position: x={C[0]:.2f} {self.unit}; y={C[1]:.2f} {self.unit}')
         if len(self.points) >= 1:
             B = self.get_relative_calibrated(self.points[-1])
@@ -352,18 +402,17 @@ class ImageWindow(QtWidgets.QMainWindow):
                 try:
                     angle = np.arccos((distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB))*180/np.pi
                     self.angle_label.setText(f'Angle: {angle:.2f} deg')
-                except RuntimeWarning as w:
-                    pass # Do not do anything, it is most likely a devide by zero error
+                except RuntimeWarning as w: pass
+                except ZeroDivisionError as e: pass
 
 class VideoWindow(ImageWindow):
     """Class for the video window of ImageP"""
-    def __init__(self, capture, origin, calibration, unit, color, alpha, keep_alpha, frame, auto_progress, auto_progress_frame_interval):
+    def __init__(self, capture, origin, calibration, unit, color, frame, auto_progress, auto_progress_frame_interval):
         self.capture = capture
         self.frame = frame
-        self.keep_alpha = keep_alpha
         self.auto_progress = auto_progress
         self.auto_progress_frame_interval = auto_progress_frame_interval
-        self.max_frame = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.max_frame = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))-1
         self.capture.set(1, frame) # Set the frame number within the VideoCapture object
         success, image = self.capture.read()
         if not success: raise Exception('Could not read video capture')
@@ -374,56 +423,48 @@ class VideoWindow(ImageWindow):
         if origin is not None: origin = (origin[0], image.shape[0]-origin[1]) 
         else: origin = (0, image.shape[0])
 
-        super(VideoWindow, self).__init__(image, origin, calibration, unit, color, alpha)
+        super(VideoWindow, self).__init__(image, origin, calibration, unit, color)
 
     def init_video_gui(self):
         """Initialize the video GUI"""
         # First initialize the image GUI, then add to that:
         self.init_gui()
 
-        # Connect the events
-        self.plotwidget.keyPressed.connect(self.on_key)
-        self.plotwidget.dotClick.connect(self.on_click)
+        # Connect to the necessary events
+        self.key_press_event.connect(self._key_press_listener)
+        self.plotwidget.point_add_event.connect(self._auto_progress_handler)
+        self.plotwidget.point_remove_last_event.connect(self._point_remove_last_listener)
 
         # Add an extra label for the frame number to the status bar
-        self.frame_label = QtWidgets.QLabel(f'Frame: {self.frame+1}/{self.max_frame}')
+        self.frame_label = QtWidgets.QLabel(f'Frame: {self.frame}/{self.max_frame}')
         self.statusbar.addWidget(self.frame_label)
 
-    def _change_image(self, frame):
+    def _key_press_listener(self, key):
+        if key == QtCore.Qt.Key_Right and self.frame < self.max_frame: self._change_frame(self.frame+1)
+        elif key == QtCore.Qt.Key_Left and self.frame > 0:  self._change_frame(self.frame-1)
+
+    def _point_remove_last_listener(self):
+        # Roll back the frames when auto-progressing is enabled
+        if self.auto_progress: self._change_frame(self.frame - self.auto_progress_frame_interval)
+
+    def _change_frame(self, frame):
         """Internal function to change the frame currently visible"""
         self.capture.set(1, frame) # Set the frame number within the VideoCapture object
         success, image = self.capture.read()
         if not success: return False
         # Convert image data to RGB for Matplotlib
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        self.plotwidget.canvas.im.set_array(image)
+        self.plotwidget.set_image(image)
 
         # Set frame label to correct frame number
-        self.frame_label.setText(f'Frame: {frame+1}/{self.max_frame}')
-
-        # Change the alpha value of the dots to 'keep_alpha's value
-        for artist in self.plotwidget.canvas.artists:
-            artist.set_alpha(self.keep_alpha)
-
-        # Redraw the canvas
-        self.plotwidget.canvas.redraw()
+        self.frame_label.setText(f'Frame: {frame}/{self.max_frame}')
+        self.frame = frame
         return True
 
-    def on_key(self, key):
-        """Internal function as listener for the key press event from Matplotlib"""
-        if key == 'right' and self.frame < self.max_frame - 1:
-            # Move frame forward, if successful, change the object variable
-            if self._change_image(self.frame + 1): self.frame += 1
-        elif key == 'left' and self.frame > 0:
-            # Move frame backward, if successful, change the object variable
-            if self._change_image(self.frame - 1): self.frame -= 1
-
-    def on_click(self):
+    def _auto_progress_handler(self, _):
         """Internal function as listener for the button click event from Matplotlib, only triggers when a dot is placed"""
         # If 'auto_progress' is true, move to next frame
-        if self.auto_progress and self._change_image(self.frame + self.auto_progress_frame_interval): 
-            self.frame += self.auto_progress_frame_interval
-        else:
+        if self.auto_progress and not self._change_frame(self.frame + self.auto_progress_frame_interval): 
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Critical)
             msg.setText('Cannot move any further!')
@@ -431,7 +472,7 @@ class VideoWindow(ImageWindow):
             msg.setWindowTitle('ImageP Error')
             msg.exec_()
 
-def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1, keep_alpha=0, frame=0, auto_progress=False, auto_progress_frame_interval=1):
+def gui(path, origin=None, calibration=(1, 1), unit='px', color='w', frame=0, auto_progress=False, auto_progress_frame_interval=10):
     """
     Function that opens the GUI of ImageP. Returns array with calibrated clicked points relative to the origin.
     Parameters:
@@ -440,13 +481,11 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
         - 'calibration': The pixel calibration array (x and y pixel size) (optional).
         - 'unit': The unit caused by the calibration array (pixels [px] by default).
             If an array with the calibration values for the pixels was passed, it is recommended to also pass the corresponding unit to prevent confusion later on.
-        - 'color': The color used for the axis and points (optional) (black by default).
-        - 'alpha': The opacity of the origin axes and the dots (1 by default).
+        - 'color': The color used for the axis and points (optional) (white by default).
         VIDEO ONLY:
         - 'frame': The frame to start the program from (0 by default).
-        - 'keep_alpha': When moving to the next frame, keep the dots with this alpha-value (invisible by default).
         - 'auto_progress': Automatically progress to the next frame after clicking (false by default).
-        - 'auto_progress_frame_interval': Frames that are skipped when auto-progressing (1 frame per click by default).
+        - 'auto_progress_frame_interval': Frames that are skipped when auto-progressing (10 frames per click by default).
 
     'origin', 'calibration' and 'unit' can also be defined from within the GUI.
    """
@@ -468,7 +507,7 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
         # Use previous instance if available
         if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
         else: app = QtWidgets.QApplication.instance()
-        window = ImageWindow(image, origin, calibration, unit, color, alpha)
+        window = ImageWindow(image, origin, calibration, unit, color)
         window.init_gui()
         window.show()
         app.exec_()
@@ -483,7 +522,7 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
         # Use previous instance if available
         if not QtWidgets.QApplication.instance(): app = QtWidgets.QApplication(sys.argv)
         else: app = QtWidgets.QApplication.instance()
-        window = VideoWindow(capture, origin, calibration, unit, color, alpha, keep_alpha, frame, auto_progress, auto_progress_frame_interval)
+        window = VideoWindow(capture, origin, calibration, unit, color, frame, auto_progress, auto_progress_frame_interval)
         window.init_video_gui()
         window.show()
         app.exec_()
@@ -493,10 +532,5 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='black', alpha=1
 
 # Test the application with a test image
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    plt.figure()
-    points = gui('./test.avi', color='blue', alpha=0.5, keep_alpha=0.2, frame=2000, auto_progress=True, auto_progress_frame_interval=10)
-    plt.scatter(points[:,0], points[:, 1], label='data', color='gray')
-    plt.legend()
-    plt.grid()
-    plt.show()
+    points = gui('./test.jpg', color='w', frame=2000, auto_progress=True, auto_progress_frame_interval=10)
+    print(points)
