@@ -448,7 +448,7 @@ class VideoWindow(ImageWindow):
         self.capture.set(1, frame) # Set the frame number within the VideoCapture object
         success, image = self.capture.read()
         if not success: return False
-        # Convert image data to RGB for Matplotlib
+        # Convert image data to RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         self.plotwidget.set_image(image)
 
