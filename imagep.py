@@ -23,8 +23,7 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
 import pyqtgraph as pg
 import numpy as np
-import sys, cv2, warnings
-warnings.filterwarnings("error")
+import sys, cv2
 
 VERSION_INFO = 'version 2.5'
 CHANGELOG = """Changelog:
@@ -394,9 +393,10 @@ class ImageWindow(QtWidgets.QMainWindow):
                 distanceAC = ((A[0]-C[0])**2+(A[1]-C[1])**2)**(1/2)
                 distanceAB = ((A[0]-B[0])**2+(A[1]-B[1])**2)**(1/2)
                 try:
-                    angle = np.arccos((distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB))*180/np.pi
+                    argument = (distanceAC**2+distanceAB**2-distanceBC**2)/(2*distanceAC*distanceAB)
+                    if not -1 <= argument <= 1: return # arccos only takes values between -1 and 1
+                    angle = np.arccos(argument)*180/np.pi
                     self.angle_label.setText(f'Angle: {angle:.2f} deg')
-                except RuntimeWarning as w: pass
                 except ZeroDivisionError as e: pass
 
 class VideoWindow(ImageWindow):
