@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from PyQt5 import QtWidgets, QtGui, QtCore
 import pyqtgraph as pg
+from pyqtgraph.Qt import QtWidgets, QtGui, QtCore
 import numpy as np
 import sys, cv2
 
@@ -81,7 +81,7 @@ class PlotWidget(QtWidgets.QWidget):
 
         # Use a grid layout for the plot, LUT and settings (with title)
         # Since the settings and LUT only need local referencing, we do not have to create a seperate class
-        layout = QtGui.QGridLayout()
+        layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
 
         self.lut = pg.HistogramLUTWidget()
@@ -105,12 +105,12 @@ class PlotWidget(QtWidgets.QWidget):
         self.lut.setImageItem(self.img)
         
         # Settings (with title)
-        label = QtGui.QLabel('<span style="font-weight:bold">Keymap:</span><br><span style="text-decoration:underline">Shift-click</span>: Add new point<br><span style="text-decoration:underline">Z</span>: Remove last point<br><span style="text-decoration:underline">Left/right arrow</span>: Change frame<br><br><span style="font-weight:bold">Image post-processing:</span>')
+        label = QtWidgets.QLabel('<span style="font-weight:bold">Keymap:</span><br><span style="text-decoration:underline">Shift-click</span>: Add new point<br><span style="text-decoration:underline">Z</span>: Remove last point<br><span style="text-decoration:underline">Left/right arrow</span>: Change frame<br><br><span style="font-weight:bold">Image post-processing:</span>')
         layout.addWidget(label, 0, 1)
-        grayBox = QtGui.QCheckBox('grayscale')
-        monoRadio = QtGui.QRadioButton('mono')
-        rgbaRadio = QtGui.QRadioButton('rgba')
-        grayBox = QtGui.QCheckBox('grayscale')
+        grayBox = QtWidgets.QCheckBox('grayscale')
+        monoRadio = QtWidgets.QRadioButton('mono')
+        rgbaRadio = QtWidgets.QRadioButton('rgba')
+        grayBox = QtWidgets.QCheckBox('grayscale')
         layout.addWidget(monoRadio, 2, 1)
         layout.addWidget(rgbaRadio, 3, 1)
         layout.addWidget(grayBox, 4, 1)
@@ -528,5 +528,5 @@ def gui(path, origin=None, calibration=(1, 1), unit='px', color='w', frame=0, au
 
 # Test the application with a test image
 if __name__ == '__main__':
-    points = gui('./test.avi', color='w', frame=2000, auto_progress=True, auto_progress_frame_interval=10)
+    points = gui('./DSC_2957.MOV', color='w', frame=2000, auto_progress=True, auto_progress_frame_interval=250)
     print(points)
