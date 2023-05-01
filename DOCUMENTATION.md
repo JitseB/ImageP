@@ -39,7 +39,7 @@ It is essential to define the pixel size in order to make measurements based upo
 It is good practice to use several points to define the pixel size due to the statistical error caused by slight misclicks in the picture.
 
 ```Python
-xcal = gui('./test.png', origin=origin, color='black')
+xcal = gui('./test.png', origin=origin, color='black')[:,0]
 
 # Show the calibration in a plot so we can see the deviation:
 plt.figure()
@@ -49,7 +49,7 @@ xdiff_mean = np.mean(xdiff)
 plt.plot(xdiff)
 plt.plot([0, len(xdiff)-1], np.ones(2)*xdiff_mean, label='mean')
 plt.legend()
-plt.grid()[:,0]
+plt.grid()
 ```
 
 After clicking the points from left to right, we get the following GUI image and plot:
