@@ -3,6 +3,9 @@ In this documentation you will find an extensive example of how to use the Image
 
 ImageP was created as a minimalistic replacement for ImageJ for automization reasons. ImageP can be used in a Jupyter notebook and has an easy to use movable origin.
 
+## Dependencies
+This library depends on [Python OpenCV](https://pypi.org/project/opencv-python/) and [pyqtgraph](https://pypi.org/project/pyqtgraph/).
+
 ## Processing an image
 For this example, we will use an image of a protractor. This way, we know for sure that the measurements of the class are correct.
 
